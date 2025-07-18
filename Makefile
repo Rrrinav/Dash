@@ -1,9 +1,10 @@
 CXX       := g++
-CXXFLAGS  := -Wall -O2 -std=c++23
+CXXFLAGS  := -Wall -O2 --std=c++23
 SRC_DIR   := ./src
 BUILD_DIR := ./build
 
-FIN_EXECUTABLE := $(BUILD_DIR)/main
+FIN_EXECUTABLE_DIR := ./dist
+FIN_EXECUTABLE := $(FIN_EXECUTABLE_DIR)/main
 
 TREE_SRC    := $(SRC_DIR)/data_tree.cpp
 TREE_OBJ    := $(BUILD_DIR)/tree.o
@@ -17,7 +18,7 @@ OBJS := $(TREE_OBJ) $(FORMAT_OBJ) $(MAIN_OBJ)
 
 all: $(FIN_EXECUTABLE)
 
-$(FIN_EXECUTABLE): $(OBJS) | $(BUILD_DIR)
+$(FIN_EXECUTABLE): $(OBJS) | $(FIN_EXECUTABLE_DIR)
 	$(CXX) $(CXXFLAGS) $(OBJS) -o $@
 
 $(TREE_OBJ): $(TREE_SRC) | $(BUILD_DIR)
@@ -32,8 +33,15 @@ $(MAIN_OBJ): $(MAIN_SRC) | $(BUILD_DIR)
 $(BUILD_DIR):
 	mkdir -p $@
 
+$(FIN_EXECUTABLE_DIR):
+	mkdir -p $@
+
+run: all
+	./dist/main
+
 clean:
 	rm -rf $(BUILD_DIR)
+	rm -rf $(FIN_EXECUTABLE)
 
 .PHONY: all clean
 

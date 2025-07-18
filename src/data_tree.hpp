@@ -1,4 +1,5 @@
 #pragma once
+
 #include <cstdint>
 #include <string>
 #include <variant>
@@ -10,9 +11,9 @@ struct Leaf;
 using Tree = std::variant<std::monostate, Node*, Leaf*>;
 using Tag = uint8_t;
 
-inline constexpr Tag TAG_ROOT = 1;
-inline constexpr Tag TAG_NODE = 2;
-inline constexpr Tag TAG_LEAF = 4;
+inline constexpr Tag TAG_ROOT = 1; // 0001
+inline constexpr Tag TAG_NODE = 2; // 0010
+inline constexpr Tag TAG_LEAF = 4; // 0100
 
 struct Leaf
 {
@@ -62,6 +63,11 @@ struct Node
 };
 
 Leaf *find_last_leaf(Node *parent);
+
+
+// -------------------------------------------------------------------------
+// FORMATTING FUNCTIONS [ std::format() ]
+// -------------------------------------------------------------------------
 
 std::string format_node(const Node &node, int depth = 0);
 std::string format_leaf(const Leaf &leaf, int depth = 0);
