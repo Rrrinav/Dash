@@ -8,8 +8,7 @@
   do { \
     const auto loc = std::source_location::current(); \
     if (!(expr)) { \
-      std::println(stderr, "{}:{}:{}: assertion failed: ({}) in function '{}'", \
-                   loc.file_name(), loc.line(), loc.column(), #expr, loc.function_name()); \
+      std::println(stderr, "{}:{}:{}: assertion failed: ({}) in function '{}'", loc.file_name(), loc.line(), loc.column(), #expr, loc.function_name()); \
       std::terminate(); \
     } \
   } while (0)
@@ -18,8 +17,7 @@
   do { \
     const auto loc = std::source_location::current(); \
     if (!(expr)) { \
-      std::println(stderr, "{}:{}:{}: assertion failed: ({}) in '{}'", \
-                   loc.file_name(), loc.line(), loc.column(), #expr, loc.function_name()); \
+      std::println(stderr, "{}:{}:{}: assertion failed: ({}) in '{}'", loc.file_name(), loc.line(), loc.column(), #expr, loc.function_name()); \
       std::println(stderr, "message: {}", msg); \
       std::terminate(); \
     } \
@@ -29,10 +27,9 @@
   do { \
     const auto loc = std::source_location::current(); \
     if (!(expr)) { \
-      std::println(stderr, "{}:{}:{}: assertion failed: ({}) in '{}'", \
-                   loc.file_name(), loc.line(), loc.column(), #expr, loc.function_name()); \
+      std::println(stderr, "{}:{}:{}: assertion failed: ({}) in '{}'", loc.file_name(), loc.line(), loc.column(), #expr, loc.function_name()); \
       std::println(stderr, "message: {}", msg); \
-      terminate_fn(); \
+      std::terminate(terminate_fn); \
     } \
   } while (0)
 

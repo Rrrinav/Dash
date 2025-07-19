@@ -1,0 +1,11 @@
+-- Connection
+Reply: "200 Connected\r\n"
+  If connected properly.
+
+-- Commands
+1. Create:
+  Command: "create <path>"
+2. Insert
+  Command: "put <path> <key> <value>"
+3. Select:
+  Command: "get <path> <key>"
