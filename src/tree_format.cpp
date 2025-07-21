@@ -20,29 +20,30 @@ std::string tag_string(Tag tag)
 std::string format_tree(const Tree &tree, int depth)
 {
   return std::visit(
-      [&](const auto &val) -> std::string
+    [&](const auto &val) -> std::string
+    {
+      using T = std::decay_t<decltype(val)>;
+      if constexpr (std::is_same_v<T, Node*>)
       {
-        using T = std::decay_t<decltype(val)>;
-        if constexpr (std::is_same_v<T, Node*>)
-        {
-          if (val)
-            return format_node(*val, depth);
-          else
-            return std::format("{}[Node] <null>\n", indent(depth));
-        }
-        else if constexpr (std::is_same_v<T, Leaf*>)
-        {
-          if (val)
-            return format_leaf(*val, depth);
-          else
-            return std::format("{}[Leaf] <null>\n", indent(depth));
-        }
+        if (val)
+          return format_node(*val, depth);
         else
-        {
-          return std::format("{}[Unknown type]\n", indent(depth));
-        }
-      },
-      tree);
+          return std::format("{}[Node] <null>\n", indent(depth));
+      }
+      else if constexpr (std::is_same_v<T, Leaf*>)
+      {
+        if (val)
+          return format_leaf(*val, depth);
+        else
+          return std::format("{}[Leaf] <null>\n", indent(depth));
+      }
+      else
+      {
+        return std::format("{}[Unknown type]\n", indent(depth));
+      }
+    },
+    tree
+  );
 }
 
 std::string format_node(const Node &node, int depth)

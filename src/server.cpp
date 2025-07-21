@@ -15,7 +15,7 @@
 
 #include "./assert.hpp"
 
-enum class Query_type { GET, PUT, CREATE, INVALID };
+enum class Query_type { GET, PUT, CREATE, HELP, INVALID };
 
 struct Query
 {
@@ -46,6 +46,9 @@ std::optional<Query> parse_command(std::string_view input)
 {
   trim_right(input);
   trim_left(input);
+
+  if (input == "help" || input == "-h" || input == "Help" || input == "h")
+    return Query {Query_type::HELP, {}, {}, {}};
 
   size_t space1 = input.find(' ');
   if (space1 == std::string_view::npos)
@@ -145,12 +148,20 @@ void child_routine(int s_cli, std::unique_ptr<Sk_client> &client, bool &should_s
   auto cmd = parse_command(buffer);
   if (!cmd)
   {
-    std::string mess = "Bad command\r\n";
-    send(s_cli, mess.data(), mess.size(), 0);
-    return;
+    std::string mess = "Bad command\r\n"; 
+    send(s_cli, mess.data(), mess.size(),  0);
+    return;                               
   }
   switch (cmd->_type)
   {
+    case Query_type::HELP: {
+      std::string mess = "Commands\r\n"
+                         "  create <path>\r\n"
+                         "  put <path> <key> <value>\r\n"
+                         "  get <path> <key>\r\n";
+
+      send(s_cli, mess.data(), mess.size(), 0);
+    } break;
     case Query_type::CREATE: {
       std::string mess = std::format("Creating: {}\r\n", cmd->_path);
       send(s_cli, mess.data(), mess.size(), 0);

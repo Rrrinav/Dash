@@ -105,3 +105,9 @@ struct std::formatter<Leaf>
     return std::format_to(ctx.out(), "{}", format_leaf(leaf)); 
   }
 };
+
+// Internal helper: recursively build the formatted string
+void pretty_print_impl(const Tree &t, int depth, const std::string &prefix, std::string &out);
+
+// Public API: pretty-print the tree into a formatted string
+std::string pretty_print(const Tree &t, int depth = 0);
