@@ -16,5 +16,7 @@ int main()
   Leaf::create_leaf(n2, "Jonas4", "abc004");
 
   std::println("{}", (Tree)(Node *)nullptr);
-  std::println("{}", pretty_print((Node *)nullptr, 2));
+  std::println("{}", (Tree)(Node *)nullptr);
+  std::println("{}", pretty_print(&root));
+  std::println("{}", root);
 }
