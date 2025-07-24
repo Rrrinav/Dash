@@ -25,7 +25,7 @@ inline constexpr Tag TAG_LEAF = 4; // 0100
 using NodeID = std::uint32_t;
 
 // Using RAM addresses as hash
-class string_key
+class string_intern
 {
   static inline std::vector<std::string> _paths;
   static inline std::unordered_map<std::string, NodeID> _str_to_id;
@@ -95,7 +95,7 @@ struct Node
   std::vector<std::pair<uint64_t, Node*>> _nodes;
 
   Node(Node * parent, const std::string& path)
-    : _parent(parent), _path(path), _id(string_key::string_to_key(path)), _nodes({})
+    : _parent(parent), _path(path), _id(string_intern::string_to_key(path)), _nodes({})
   {}
 
   ~Node()
@@ -107,7 +107,7 @@ struct Node
   {
     __assert(node != nullptr, "Node has to exist");
 
-    NodeID id = string_key::string_to_key(node->_path);
+    NodeID id = string_intern::string_to_key(node->_path);
     node->_id = id;
     std::size_t lb = lower_bound(_nodes, id);
     if (lb < _nodes.size() && _nodes[lb].first == id)
@@ -127,7 +127,7 @@ struct Node
 
   Node * create_child_node(const std::string& path)
   {
-    NodeID id = string_key::string_to_key(path);
+    NodeID id = string_intern::string_to_key(path);
     std::size_t lb = lower_bound(_nodes, id);
     if (lb < _nodes.size() && _nodes[lb].first == id)
       return _nodes[lb].second;
@@ -141,7 +141,7 @@ struct Node
 
   std::optional<Node *> search(const std::string& path)
   {
-    NodeID id = string_key::string_to_key(path);
+    NodeID id = string_intern::string_to_key(path);
 
     std::size_t lb = lower_bound(_nodes, id);
     if (lb < _nodes.size() && _nodes[lb].first == id)
@@ -152,7 +152,7 @@ struct Node
 
   Node* delete_child_node(const std::string& path)
   {
-    NodeID id = string_key::string_to_key(path);
+    NodeID id = string_intern::string_to_key(path);
 
     std::size_t lb = lower_bound(_nodes, id);
     if (lb < _nodes.size() && _nodes[lb].first == id)
