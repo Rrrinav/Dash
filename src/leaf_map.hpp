@@ -9,16 +9,17 @@
 class Leaf_map
 {
   // === Constants for control byte markers ===
-  static constexpr uint8_t EMPTY = 0x80;    // Indicates slot is empty
-  static constexpr uint8_t DELETED = 0xFE;  // Indicates slot was deleted
+  static constexpr uint8_t EMPTY = 0x80;    // 0b10000000
+  static constexpr uint8_t DELETED = 0xFE;  // 0b11111110
   static constexpr size_t MIN_CAPACITY = 16;
   static constexpr size_t GROUP_SIZE = 16;
   static constexpr float MAX_LOAD = 0.65f;
-  static constexpr size_t INITIAL_ARENA_SIZE = 4096;
+  static constexpr size_t INITIAL_ARENA_SIZE = 2048;
 
   // === Represents a key-value pair stored in the hash table ===
   struct Entry
   {
+    uint64_t short_key;
     const char *key = nullptr;
     const char *value = nullptr;
     size_t key_len = 0;
@@ -168,6 +169,8 @@ class Leaf_map
     size_t insert_index = SIZE_MAX;
     bool found = false;
 
+    uint64_t smol{};
+    if (key_len < 8) std::memcpy(&smol, key, key_len);
     // Probe for matching or empty slot
     for (size_t i = 0; i < capacity; i++)
     {
@@ -197,6 +200,7 @@ class Leaf_map
           std::memcpy(new_data + key_len + 1, value, value_len);
           new_data[key_len + 1 + value_len] = '\0';
 
+          e.short_key = smol;
           e.key = new_data;
           e.value = new_data + key_len + 1;
           e.key_len = key_len;
@@ -217,6 +221,7 @@ class Leaf_map
       data[key_len + 1 + value_len] = '\0';
 
       Entry &e = entries[insert_index];
+      e.short_key = smol;
       e.key = data;
       e.value = data + key_len + 1;
       e.key_len = key_len;
@@ -268,7 +273,21 @@ public:
       else if (ctrl == H2)
       {
         const Entry &e = entries[index];
-        if (e.key[0] == key[0] && std::memcmp(e.key, key.data(), key.size()) == 0)
+        if (e.key_len != key.length())
+          continue;  // Length mismatch, not our key
+
+        // For small keys (less than 8 bytes), compare using short_key
+        if (e.key_len < 8)
+        {
+          uint64_t smol = 0;
+          std::memcpy(&smol, key.data(), key.length());
+          if (smol == e.short_key)
+            return std::string(e.value, e.value_len);
+          else
+            continue;  // Not a match, keep searching
+        }
+        // For longer keys, do full comparison
+        if (e.hash == hash && e.key[0] == key[0] && std::memcmp(e.key, key.data(), key.size()) == 0)
           return std::string(e.value, e.value_len);
       }
     }
