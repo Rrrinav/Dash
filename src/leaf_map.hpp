@@ -2,333 +2,328 @@
 
 #include <string>
 #include <vector>
-#include <cstdint>
-#include <cstring>
 #include <optional>
+#include <cstring>
+#include <cassert>
+#include <cstdint>
+#include <utility>
 
-class Leaf_map
+/**
+ * @brief Computes a 64-bit hash for a given string using a simplified Wyhash-style hash.
+ *
+ * @param s Input string
+ * @return 64-bit hash value
+ */
+static uint64_t wyhash_str(const std::string &s)
 {
-  // === Constants for control byte markers ===
-  static constexpr uint8_t EMPTY = 0x80;    // 0b10000000
-  static constexpr uint8_t DELETED = 0xFE;  // 0b11111110
-  static constexpr size_t MIN_CAPACITY = 16;
-  static constexpr size_t GROUP_SIZE = 16;
-  static constexpr float MAX_LOAD = 0.65f;
-  static constexpr size_t INITIAL_ARENA_SIZE = 2048;
+  uint64_t hash = 0xa0761d6478bd642fULL ^ s.size();
+  for (char c : s)
+    hash = (hash ^ uint8_t(c)) * 0xe7037ed1a0b428dbULL;
+  hash ^= (hash >> 33);
+  return hash;
+}
 
-  // === Represents a key-value pair stored in the hash table ===
-  struct Entry
+/**
+ * @brief A lightweight open-addressed hash map specialized for string-to-string mapping.
+ *
+ * Uses linear probing, fingerprinting for fast comparisons, and supports O(1) access.
+ * Does not preserve insertion order. Not thread-safe.
+ */
+class leaf_map
+{
+  struct bucket
   {
-    uint64_t short_key;
-    const char *key = nullptr;
-    const char *value = nullptr;
-    size_t key_len = 0;
-    size_t value_len = 0;
-    uint64_t hash = 0;  // Cached hash for faster comparisons
+    uint8_t ctrl;      ///< Control byte: high bit = empty/deleted, low 7 bits = hash fingerprint
+    std::string key;   ///< Key string
+    std::string value; ///< Value string
+    bucket() : ctrl(0x80) {} ///< Default: mark as empty
   };
 
-  // === Arena allocator block for allocating key-value memory ===
-  struct Arena_block
-  {
-    char *data;
-    size_t size;
-    size_t used = 0;
+  std::vector<bucket> _store; ///< Hash table buckets
+  size_t _mask;               ///< Mask for mod-indexing
+  size_t _size;               ///< Number of live entries
+  float _max_load;            ///< Max load factor before resizing
 
-    Arena_block(size_t size) : size(size), data(new char[size]) {}
-
-    // Move constructor
-    Arena_block(Arena_block &&other) noexcept : data(other.data), size(other.size), used(other.used)
-    {
-      other.data = nullptr;
-      other.size = 0;
-      other.used = 0;
-    }
-
-    // Move assignment operator
-    Arena_block &operator=(Arena_block &&other) noexcept
-    {
-      if (this != &other)
-      {
-        delete[] data;
-        data = other.data;
-        size = other.size;
-        used = other.used;
-
-        other.data = nullptr;
-        other.size = 0;
-        other.used = 0;
-      }
-      return *this;
-    }
-
-    // Disable copying
-    Arena_block(const Arena_block &) = delete;
-    Arena_block &operator=(const Arena_block &) = delete;
-
-    ~Arena_block() { delete[] data; }
-  };
-
-  // === Internal state ===
-  std::vector<uint8_t> control;           // Control bytes per slot
-  std::vector<Entry> entries;             // Actual entries (key-value pairs)
-  std::vector<Arena_block> arena_blocks;  // Arena-allocated key/value storage
-  size_t capacity;
-  size_t count;
-  size_t mask;
-  size_t arena_block_size = INITIAL_ARENA_SIZE;
-
-  // === Hash function (FNV-1a 64-bit) ===
-  static uint64_t hash_string(const char *data, size_t size) noexcept
-  {
-    constexpr uint64_t FNV_OFFSET_BASIS = 0xcbf29ce484222325;
-    constexpr uint64_t FNV_PRIME = 0x100000001b3;
-
-    uint64_t hash = FNV_OFFSET_BASIS;
-    for (size_t i = 0; i < size; ++i)
-    {
-      hash ^= static_cast<uint64_t>(static_cast<uint8_t>(data[i]));
-      hash *= FNV_PRIME;
-    }
-    return hash;
-  }
-
-  // === Compute next power of two >= n ===
-  static size_t next_power_of_two(size_t n)
-  {
-    if (n <= 1)
-      return 1;
-    n--;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    n |= n >> 32;
-    return n + 1;
-  }
-
-  // === Allocate memory from current or new arena block ===
-  char *arena_allocate(size_t size)
-  {
-    if (!arena_blocks.empty())
-    {
-      Arena_block &block = arena_blocks.back();
-      if (block.used + size <= block.size)
-      {
-        char *ptr = block.data + block.used;
-        block.used += size;
-        return ptr;
-      }
-    }
-
-    // Allocate new arena block
-    size_t new_block_size = std::max(arena_block_size, size);
-    arena_blocks.emplace_back(new_block_size);
-    arena_block_size *= 2;  // Exponential growth
-
-    Arena_block &new_block = arena_blocks.back();
-    char *ptr = new_block.data;
-    new_block.used = size;
-    return ptr;
-  }
-
-  // === Resize and rehash all entries ===
-  void rehash(size_t new_capacity)
-  {
-    new_capacity = next_power_of_two(new_capacity);
-    std::vector<uint8_t> old_control = std::move(control);
-    std::vector<Entry> old_entries = std::move(entries);
-    std::vector<Arena_block> old_arena_blocks = std::move(arena_blocks);
-
-    control.clear();
-    control.resize(new_capacity, EMPTY);
-    entries.clear();
-    entries.resize(new_capacity);
-    arena_blocks.clear();
-    arena_block_size = INITIAL_ARENA_SIZE;
-
-    capacity = new_capacity;
-    mask = capacity - 1;
-    count = 0;
-
-    for (size_t i = 0; i < old_control.size(); i++)
-    {
-      if (old_control[i] != EMPTY && old_control[i] != DELETED)
-      {
-        const Entry &e = old_entries[i];
-        put_impl(e.key, e.key_len, e.value, e.value_len, e.hash);
-      }
-    }
-  }
-
-  // === Core insertion logic used by both put() and rehash() ===
-  void put_impl(const char *key, size_t key_len, const char *value, size_t value_len, uint64_t hash)
-  {
-    const uint8_t H2 = (hash >> 57) & 0x7F;
-    size_t start_index = hash & mask;
-    size_t insert_index = SIZE_MAX;
-    bool found = false;
-
-    uint64_t smol{};
-    if (key_len < 8) std::memcpy(&smol, key, key_len);
-    // Probe for matching or empty slot
-    for (size_t i = 0; i < capacity; i++)
-    {
-      size_t index = (start_index + i) & mask;
-      uint8_t &ctrl = control[index];
-
-      if (ctrl == EMPTY)
-      {
-        if (insert_index == SIZE_MAX)
-          insert_index = index;
-        break;
-      }
-      else if (ctrl == DELETED)
-      {
-        if (insert_index == SIZE_MAX)
-          insert_index = index;
-      }
-      else if (ctrl == H2)
-      {
-        Entry &e = entries[index];
-        if (e.hash == hash && e.key[0] == key[0] && std::memcmp(e.key, key, key_len) == 0)
-        {
-          // Update existing entry
-          char *new_data = arena_allocate(key_len + value_len + 2);
-          std::memcpy(new_data, key, key_len);
-          new_data[key_len] = '\0';
-          std::memcpy(new_data + key_len + 1, value, value_len);
-          new_data[key_len + 1 + value_len] = '\0';
-
-          e.short_key = smol;
-          e.key = new_data;
-          e.value = new_data + key_len + 1;
-          e.key_len = key_len;
-          e.value_len = value_len;
-          found = true;
-          break;
-        }
-      }
-    }
-
-    if (!found && insert_index != SIZE_MAX)
-    {
-      // New entry: allocate key+value memory
-      char *data = arena_allocate(key_len + value_len + 2);
-      std::memcpy(data, key, key_len);
-      data[key_len] = '\0';
-      std::memcpy(data + key_len + 1, value, value_len);
-      data[key_len + 1 + value_len] = '\0';
-
-      Entry &e = entries[insert_index];
-      e.short_key = smol;
-      e.key = data;
-      e.value = data + key_len + 1;
-      e.key_len = key_len;
-      e.value_len = value_len;
-      e.hash = hash;
-
-      control[insert_index] = H2;
-      count++;
-    }
-  }
+  static constexpr uint8_t h2(uint64_t h) { return static_cast<uint8_t>(h >> 57); }
 
 public:
-  // === Constructor with optional initial capacity ===
-  Leaf_map(size_t initial_capacity = MIN_CAPACITY) : capacity(next_power_of_two(initial_capacity)), count(0), mask(capacity - 1)
+  /**
+   * @brief Construct a fast_strmap with optional initial capacity.
+   *
+   * @param initial Minimum capacity (rounded to next power of 2)
+   */
+  leaf_map(size_t initial = 16)
+      : _store(next_pow2(initial)), _mask(_store.size() - 1), _size(0), _max_load(0.65f) {}
+
+  /**
+   * @brief Insert or update a key-value pair.
+   *
+   * @param k Key
+   * @param v Value
+   * @return Pointer to stored value string
+   */
+  std::string *put(const std::string &k, const std::string &v)
   {
-    control.resize(capacity, EMPTY);
-    entries.resize(capacity);
-  }
+    grow_if_needed();
+    uint64_t h = wyhash_str(k);
+    uint8_t fp = h2(h);
+    size_t idx = h & _mask, dist = 0;
 
-  // === Public insertion API ===
-  void put(const std::string &key, const std::string &value)
-  {
-    if (count + 1 > capacity * MAX_LOAD)
-      rehash(capacity * 2);
-
-    const uint64_t hash = hash_string(key.data(), key.size());
-    put_impl(key.data(), key.size(), value.data(), value.size(), hash);
-  }
-
-  // === Lookup an entry by key ===
-  std::optional<std::string> get(const std::string &key) const
-  {
-    if (count == 0)
-      return std::nullopt;
-
-    const uint64_t hash = hash_string(key.data(), key.size());
-    const uint8_t H2 = (hash >> 57) & 0x7F;
-    size_t start_index = hash & mask;
-
-    for (size_t i = 0; i < capacity; i++)
+    for (;;)
     {
-      size_t index = (start_index + i) & mask;
-      const uint8_t ctrl = control[index];
-
-      if (ctrl == EMPTY)
+      bucket &b = _store[idx];
+      if (is_empty(b))
       {
-        return std::nullopt;
+        // Empty slot found — insert new pair
+        b.ctrl = fp;
+        b.key = k;
+        b.value = v;
+        ++_size;
+        return &b.value;
       }
-      else if (ctrl == H2)
+      if (b.ctrl == fp && b.key == k)
       {
-        const Entry &e = entries[index];
-        if (e.key_len != key.length())
-          continue;  // Length mismatch, not our key
-
-        // For small keys (less than 8 bytes), compare using short_key
-        if (e.key_len < 8)
-        {
-          uint64_t smol = 0;
-          std::memcpy(&smol, key.data(), key.length());
-          if (smol == e.short_key)
-            return std::string(e.value, e.value_len);
-          else
-            continue;  // Not a match, keep searching
-        }
-        // For longer keys, do full comparison
-        if (e.hash == hash && e.key[0] == key[0] && std::memcmp(e.key, key.data(), key.size()) == 0)
-          return std::string(e.value, e.value_len);
+        // Key match — overwrite
+        b.value = v;
+        return &b.value;
       }
+      // Continue probing
+      ++dist;
+      ++idx;
+      idx &= _mask;
+    }
+  }
+
+  /**
+   * @brief Lookup key. Returns pointer to value if found, or nullptr.
+   *
+   * @param k Key to search
+   * @return Pointer to stored value, or nullptr
+   */
+  std::string *get(const std::string &k)
+  {
+    uint64_t h = wyhash_str(k);
+    uint8_t fp = h2(h);
+    size_t idx = h & _mask, dist = 0;
+
+    for (;;)
+    {
+      bucket &b = _store[idx];
+      if (is_empty(b))
+        return nullptr;
+
+      // Fast fingerprint + first-char shortcut, then full key compare
+      if (b.ctrl == fp && b.key[0] == k[0] && b.key == k)
+        return &b.value;
+
+      ++dist;
+      ++idx;
+      idx &= _mask;
+    }
+  }
+
+  /**
+   * @brief Safe lookup with optional reference wrapper
+   *
+   * @param k Key to search
+   * @return std::optional<std::reference_wrapper<std::string>> 
+   *         Empty if key not found, wrapped reference if found
+   */
+  std::optional<std::reference_wrapper<std::string>> get_opt(const std::string& k) {
+    if (auto p = get(k)) {
+      return std::ref(*p);
     }
     return std::nullopt;
   }
 
-  // === Erase an entry by key ===
-  bool erase(const std::string &key)
+  /**
+   * @brief Const version of safe lookup
+   */
+  std::optional<std::reference_wrapper<const std::string>> get_opt(const std::string& k) const {
+    if (auto p = get(k)) {
+      return std::cref(*p);
+    }
+    return std::nullopt;
+  }
+
+  /// Const overload of get()
+  std::string *get(const std::string &k) const { return const_cast<leaf_map *>(this)->get(k); }
+
+  /**
+   * @brief Erase entry by key. Returns true if key existed.
+   */
+  bool erase(const std::string &k)
   {
-    if (count == 0)
-      return false;
+    uint64_t h = wyhash_str(k);
+    uint8_t fp = h2(h);
+    size_t idx = h & _mask;
 
-    const uint64_t hash = hash_string(key.data(), key.size());
-    const uint8_t H2 = (hash >> 57) & 0x7F;
-    size_t start_index = hash & mask;
-
-    for (size_t i = 0; i < capacity; i++)
+    for (;;)
     {
-      size_t index = (start_index + i) & mask;
-      uint8_t &ctrl = control[index];
-
-      if (ctrl == EMPTY)
-      {
+      bucket &b = _store[idx];
+      if (is_empty(b))
         return false;
-      }
-      else if (ctrl == H2)
+      if (b.ctrl == fp && b.key == k)
       {
-        Entry &e = entries[index];
-        if (e.hash == hash && e.key_len == key.size() && std::memcmp(e.key, key.data(), key.size()) == 0)
+        b.ctrl = 0x80; // Mark as empty
+        backward_shift(idx);
+        --_size;
+        return true;
+      }
+      ++idx;
+      idx &= _mask;
+    }
+  }
+
+  /**
+   * @brief Returns number of entries in map.
+   */
+  size_t size() const { return _size; }
+
+  /**
+   * @brief Returns true if map is empty.
+   */
+  bool empty() const { return _size == 0; }
+
+  /**
+   * @brief Reserve at least `n` elements of capacity.
+   */
+  void reserve(size_t n)
+  {
+    if (n > _store.size() * _max_load)
+      rehash(next_pow2(n / _max_load + 1));
+  }
+
+  /**
+   * @brief Iterator for key-value pairs in the map.
+   * Provides `{const std::string&, std::string&}` on dereference.
+   */
+  struct iterator
+  {
+    const std::vector<bucket> *_store;
+    size_t _idx, _end;
+
+    iterator(const std::vector<bucket> *s, size_t i)
+        : _store(s), _idx(i), _end(s->size()) { skip(); }
+
+    void skip()
+    {
+      while (_idx < _end && is_empty((*_store)[_idx])) ++_idx;
+    }
+
+    iterator &operator++()
+    {
+      ++_idx;
+      skip();
+      return *this;
+    }
+
+    bool operator!=(const iterator &o) const { return _idx != o._idx; }
+
+    auto operator*() const -> std::pair<const std::string &, std::string &>
+    {
+      auto &b = const_cast<bucket &>((*_store)[_idx]);
+      return {b.key, b.value};
+    }
+  };
+
+  /// Returns iterator to beginning
+  iterator begin() const { return iterator(&_store, 0); }
+
+  /// Returns iterator to end
+  iterator end() const { return iterator(&_store, _store.size()); }
+
+  /**
+   * @brief Lookup with optional fallback (UX wrapper).
+   *
+   * @param key Key to lookup
+   * @param fallback Value to return if key is not found
+   * @return Reference to found value or fallback
+   */
+  const std::string &get_or(const std::string &key, const std::string &fallback) const
+  {
+    auto *p = get(key);
+    return p ? *p : fallback;
+  }
+
+  /**
+   * @brief Check if key exists.
+   */
+  bool contains(const std::string &key) const
+  {
+    return get(key) != nullptr;
+  }
+
+private:
+  static size_t next_pow2(size_t v)
+  {
+    size_t n = 1;
+    while (n < v) n <<= 1;
+    return n;
+  }
+
+  static bool is_empty(const bucket &b) { return b.ctrl & 0x80; }
+
+  void grow_if_needed()
+  {
+    if ((_size + 1) > _store.size() * _max_load)
+      rehash(_store.size() * 2);
+  }
+
+  void rehash(size_t newcap)
+  {
+    std::vector<bucket> newstore(newcap);
+    size_t newmask = newcap - 1;
+
+    for (auto &b : _store)
+    {
+      if (!is_empty(b))
+      {
+        uint64_t h = wyhash_str(b.key);
+        size_t idx = h & newmask, dist = 0;
+        uint8_t fp = h2(h);
+
+        for (;; ++dist, ++idx, idx &= newmask)
         {
-          ctrl = DELETED;
-          e = Entry{};  // Reset entry
-          count--;
-          return true;
+          bucket &dst = newstore[idx];
+          if (is_empty(dst))
+          {
+            dst.ctrl = fp;
+            dst.key = std::move(b.key);
+            dst.value = std::move(b.value);
+            break;
+          }
         }
       }
     }
-    return false;
+
+    _store.swap(newstore);
+    _mask = newmask;
   }
 
-  // === Accessors ===
-  size_t size() const { return count; }
-  size_t get_capacity() const { return capacity; }
+  void backward_shift(size_t hole)
+  {
+    size_t idx = (hole + 1) & _mask;
+
+    for (;;)
+    {
+      auto &b = _store[idx];
+      if (is_empty(b))
+        break;
+
+      uint64_t ideal = wyhash_str(b.key) & _mask;
+      if (distance(ideal, idx) == 0)
+        break;
+
+      _store[hole] = std::move(b);
+      b.ctrl = 0x80;
+      hole = idx;
+      idx = (hole + 1) & _mask;
+    }
+  }
+
+  static size_t distance(size_t a, size_t b)
+  {
+    return (b + (1ull << 63) - a) & ((1ull << 63) - 1);
+  }
 };

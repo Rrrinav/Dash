@@ -10,6 +10,8 @@
 #include <vector>
 #include <cstdint>
 #include <unordered_map>
+
+#include "./src/leaf_map.hpp"
 #include "src/assert.hpp"
 
 struct Node;
@@ -54,30 +56,6 @@ public:
   }
 };
 
-struct Leaf
-{
-  Tag          _tag;
-  Tree         _left;
-  Leaf *       _right = nullptr;
-  std::string  _key;
-  std::string  _value;
-
-  Leaf(const std::string& key, const std::string &value)
-    : _tag(TAG_LEAF), _left(),  _right(nullptr), _key(key), _value(value) {}
-
-  Leaf(const std::string &key, const std::string &value, Tree left)
-    : _tag(TAG_LEAF), _left(left), _key(key), _value(value) {}
-
-  ~Leaf() = default;
-  Leaf(const Leaf &) = delete;
-  Leaf &operator=(const Leaf &) = delete;
-
-  Leaf(Leaf &&) = default;
-  Leaf &operator=(Leaf &&) = default;
-
-  static Leaf *create_leaf(Node *parent, const std::string &key, const std::string &value);
-};
-
 // Returns index where first id >= desired Id exists.
 inline NodeID lower_bound(const std::vector<std::pair<uint64_t, Node*>>& nodes, NodeID id)
 {
@@ -93,6 +71,7 @@ struct Node
   std::string _path;
   NodeID      _id;
   std::vector<std::pair<uint64_t, Node*>> _nodes;
+  Leaf_map _leaves;
 
   Node(Node * parent, const std::string& path)
     : _parent(parent), _path(path), _id(string_intern::string_to_key(path)), _nodes({})
@@ -163,6 +142,14 @@ struct Node
     }
     return nullptr; // not found
   }
+
+  void add_entry(const std::string& key, const std::string& value)
+  {
+    _leaves.put(key, value);
+  }
+
+  std::optional<std::string> get_value(const std::string& key)
+  {
+    return _leaves.get(key);
+  }
 };
-
-
