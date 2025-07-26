@@ -1,93 +1,195 @@
-#include "data_tree.hpp"
+#include <algorithm>
+#include <algorithm>
 #include <cstddef>
-#include <variant>
-#include "./assert.hpp"
+#include <cstdint>
+#include <expected>
+#include <optional>
+#include <string>
+#include <ranges>
+#include <vector>
+#include <cstdint>
 
-Node::~Node()
+#include "data_tree.hpp"
+
+#include "assert.hpp"
+
+struct Node;
+// Returns index where first id >= desired Id exists.
+inline NodeID lower_bound(const std::vector<std::pair<uint64_t, Node *>> &nodes, NodeID id)
 {
-  delete _left;
-  Leaf *leaf = _right;
-  while (leaf)
-  {
-    Leaf *next = leaf->_right;
-    delete leaf;
-    leaf = next;
-  }
+  auto it = std::ranges::lower_bound(nodes, id, {}, [](const auto &pair) { return pair.first; });
+  return static_cast<NodeID>(it - nodes.begin());
 }
 
-Node *Node::create_node(Node *parent, const std::string &path)
+NodeID Node::insert(Node *node)
 {
-  __assert(parent, "Parent has to exist");
+  __assert(node != nullptr, "Node has to exist");
 
-  Node *node = new Node(TAG_NODE, path, parent);
-  parent->_left = node;
+  NodeID id = string_intern::string_to_key(node->_path);
+  node->_id = id;
+  std::size_t lb = lower_bound(_nodes, id);
+  if (lb < _nodes.size() && _nodes[lb].first == id)
+    return _nodes[lb].first;
+
+  _nodes.insert(_nodes.begin() + lb, {id, node});
+  return id;
+}
+
+Node * Node::create_child_node(const std::string &path)
+{
+  NodeID id = string_intern::string_to_key(path);
+  std::size_t lb = lower_bound(_nodes, id);
+  if (lb < _nodes.size() && _nodes[lb].first == id)
+    return _nodes[lb].second;
+
+  // Doing heap allocation only if necessary, that's why searching earler.
+  Node *node = new Node(this, path);
+  node->_id = id;
+  _nodes.insert(_nodes.begin() + lb, {id, node});
   return node;
 }
 
-inline Leaf *find_last_leaf(Node *parent)
+std::optional<Node *> Node::search(const std::string &path)
 {
-  __assert(parent, "Parent has to exist");
+  NodeID id = string_intern::string_to_key(path);
 
-  Leaf *l = parent->_right;
-  while (l && l->_right)
-    l = l->_right;
-  return l;
-}
-
-Leaf *Leaf::create_leaf(Node *parent, const std::string &key, const std::string &value)
-{
-  __assert(parent, "Parent has to exist");
-
-  Leaf *leaf = new Leaf(key, value);
-  Leaf *last = find_last_leaf(parent);
-
-  if (!last)
-  {
-    parent->_right = leaf;
-    leaf->_left    = parent;
-  }
+  std::size_t lb = lower_bound(_nodes, id);
+  if (lb < _nodes.size() && _nodes[lb].first == id)
+    return _nodes[lb].second;
   else
-  {
-    last->_right = leaf;
-    leaf->_left  = last;
-  }
-  return leaf;
+    return std::nullopt;
 }
 
-void pretty_print_impl(const Tree &t, int depth, const std::string &prefix, std::string &out)
+Node * Node::delete_child_node(const std::string &path)
 {
-  if (auto node = std::get_if<Node *>(&t); node && *node)
-  {
-    // Print node path
-    out += std::string(depth * 2, ' ') + (*node)->_path + "\n";
-    // For each leaf child of this node
-    for (Leaf *leaf = (*node)->_right; leaf; leaf = leaf->_right)
-      pretty_print_impl(leaf, depth + 2, (*node)->_path, out);
+  NodeID id = string_intern::string_to_key(path);
 
-    if((*node)->_left)
-      pretty_print_impl((*node)->_left, depth + 1, (*node)->_path + "/", out);
-  }
-  else if (auto leaf = std::get_if<Leaf *>(&t); leaf && *leaf)
+  std::size_t lb = lower_bound(_nodes, id);
+  if (lb < _nodes.size() && _nodes[lb].first == id)
   {
-    // Full path = prefix + key
-    std::string fullPath = prefix + (*leaf)->_key;
-    // Print leaf with its value
-    out += std::string(depth * 2, ' ') + fullPath + " -> " + (*leaf)->_value + "\n";
-    for(Leaf * l = (*leaf)->_right; l; l = l->_right)
-      pretty_print_impl(l, depth, prefix, out);
+    Node *child = _nodes[lb].second;
+    _nodes.erase(_nodes.begin() + lb);
+    return child;
   }
-  else
-  {
-    out = "Invalid tree : <null>";
-  }
+  return nullptr;  // not found
 }
 
-std::string pretty_print(const Tree &t, int depth)
-{
-  if (t.valueless_by_exception()) 
-    return "<null>";
 
-  std::string out;
-  pretty_print_impl(t, depth, "", out);
-  return out;
+std::optional<Node *> Tree::find(const std::string &path) const
+{
+  std::vector<std::string> comps = split_path_view(path);
+  Node *current = this->_root;
+
+  for (const auto &c : comps)
+    if (auto found = current->search(c); found.has_value())
+      current = found.value();
+    else
+      return std::nullopt;
+  return current;
+}
+
+Node * Tree::insert(const std::string &path)
+{
+  std::vector<std::string> comps = split_path_view(path);
+  Node *current = this->_root;
+
+  for (const auto &c : comps)
+    if (auto found = current->search(c); found)
+      current = *found;
+    else
+      current = current->create_child_node(c);
+  return current;
+}
+
+bool Tree::remove(const std::string &path)
+{
+  auto components = split_path_view(path);
+  if (components.empty())
+    return false;
+
+  // Find parent of the node to remove
+  std::string_view leaf = components.back();
+  components.pop_back();
+
+  auto parent = find(join_path(components));
+  if (!parent)
+    return false;
+
+  Node *to_delete = (*parent)->delete_child_node(leaf.data());
+  if (to_delete)
+  {
+    delete to_delete;
+    return true;
+  }
+  return false;
+}
+
+std::expected<std::string *, std::string> Tree::set(const std::string &path, const std::string &key, const std::string &val)
+{
+  auto node = this->find(path);
+  if (!node.has_value())
+    return std::unexpected<std::string>(
+        std::format("Couldn't set value: {} at key: {} because no node at path: {} exists", val, key, path));
+
+  return node.value()->_leaves.put(key, val);
+}
+
+[[nodiscard("Use it immediately or copy it, pointer may become invalid after next operation on map or map deletion")]]
+std::expected<std::string *, std::string> Tree::get(const std::string &path, const std::string &key)
+{
+  auto node = this->find(path);
+  if (!node)
+    return std::unexpected<std::string>(std::format("Couldn't get value at key: {} because no node at path: {} exists", key, path));
+
+  auto v = node.value()->_leaves.get(key);
+  if (v == nullptr)
+    return std::unexpected<std::string>(
+        std::format("Couldn't get value at key: {} & path: {} because key itself doesn't exist", key, path));
+
+  return v;
+}
+
+std::string Tree::print() const
+{
+  std::string s{};
+  print_recursive(_root, 0, s);
+  return s;
+}
+
+void Tree::print_recursive(Node *root, int indent, std::string &out) const
+{
+  out += std::string(indent, ' ') + root->_path + "\n";
+
+  if (!root->_leaves.empty())
+    for (const auto &[k, v] : root->_leaves) out += std::string(indent + 1, ' ') + root->_path + " : " + k + " -> " + v + "\n";
+  for (const auto &[id, child] : root->_nodes) print_recursive(child, indent + 2, out);
+}
+
+std::vector<std::string> Tree::split_path_view(const std::string &path) const
+{
+  using namespace std::literals;
+
+  if (path.empty())
+    return {};
+
+  auto components = path | std::views::split('/') |
+                    std::views::transform([](auto &&range) { return std::string(range.begin(), range.end()); }) |
+                    std::views::filter([](const std::string &sv) { return !sv.empty(); });
+
+  return {components.begin(), components.end()};
+}
+
+std::string Tree::join_path(const std::vector<std::string> &components) const
+{
+  if (components.empty())
+    return "";
+
+  std::string result;
+  for (size_t i = 0; i < components.size(); ++i)
+  {
+    if (i != 0)
+      result += '/';
+    result += components[i].data();
+  }
+  return result;
 }

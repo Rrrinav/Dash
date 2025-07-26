@@ -1,22 +1,42 @@
+#include "./src/server.hpp"
+
+#include <csignal>
+#include <exception>
 #include <print>
+#include <string>
 
-#include "./src/data_tree.hpp"
+void handle_sigchld(int) { while (waitpid(-1, nullptr, WNOHANG) > 0); }
 
-int main()
+int print_usage(std::string prog)
 {
-  Node root = Node(TAG_ROOT, "/");
-  Node * n  = Node::create_node(&root, "/users/");
-  Node * n1 = Node::create_node(n, "/users/login/");
+  std::string s = "Usage : "
+                  "   " + prog + "\n"
+                  " or\n"
+                  "   " + prog + "<port>\n";
+  std::println("{}", s);
+  return 1;
+}
 
-  Leaf::create_leaf(n1, "Jonas", "abc001");
-  Leaf::create_leaf(n1, "Jonas2", "abc002");
+int main(int argc, char * argv[])
+{
+  unsigned short port = 0;
+  if (argc == 2)
+  {
+    try
+    { port = std::stoi(argv[1]); }
+    catch(std::exception & e)
+    { return print_usage(argv[0]); }
+  }
 
-  Node * n2 = Node::create_node(n1, "/users/search/");
-  Leaf::create_leaf(n2, "Jonas3", "abc003");
-  Leaf::create_leaf(n2, "Jonas4", "abc004");
+  port = PORT;
 
-  std::println("{}", (Tree)(Node *)nullptr);
-  std::println("{}", (Tree)(Node *)nullptr);
-  std::println("{}", pretty_print(&root));
-  std::println("{}", root);
+  std::signal(SIGCHLD, handle_sigchld);
+
+  int skt = init_server(port);
+
+  while (true)
+    main_routine(skt);
+
+  close(skt);
+  return 0;
 }

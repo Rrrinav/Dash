@@ -8,13 +8,13 @@ FIN_EXECUTABLE := $(FIN_EXECUTABLE_DIR)/main
 
 TREE_SRC    := $(SRC_DIR)/data_tree.cpp
 TREE_OBJ    := $(BUILD_DIR)/tree.o
-FORMAT_SRC  := $(SRC_DIR)/tree_format.cpp
-FORMAT_OBJ  := $(BUILD_DIR)/tree_form.o
+SERVER_SRC  := $(SRC_DIR)/server.cpp
+SERVER_OBJ  := $(BUILD_DIR)/server.o
 
 MAIN_SRC  := ./main.cpp
 MAIN_OBJ  := $(BUILD_DIR)/main.o
 
-OBJS := $(TREE_OBJ) $(FORMAT_OBJ) $(MAIN_OBJ)
+OBJS := $(TREE_OBJ) $(SERVER_OBJ) $(MAIN_OBJ) 
 
 all: $(FIN_EXECUTABLE)
 
@@ -24,7 +24,7 @@ $(FIN_EXECUTABLE): $(OBJS) | $(FIN_EXECUTABLE_DIR)
 $(TREE_OBJ): $(TREE_SRC) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(FORMAT_OBJ): $(FORMAT_SRC) | $(BUILD_DIR)
+$(SERVER_OBJ): $(SERVER_SRC) | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(MAIN_OBJ): $(MAIN_SRC) | $(BUILD_DIR)

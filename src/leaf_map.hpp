@@ -29,7 +29,7 @@ static uint64_t wyhash_str(const std::string &s)
  * Uses linear probing, fingerprinting for fast comparisons, and supports O(1) access.
  * Does not preserve insertion order. Not thread-safe.
  */
-class leaf_map
+class Leaf_map
 {
   struct bucket
   {
@@ -52,7 +52,7 @@ public:
    *
    * @param initial Minimum capacity (rounded to next power of 2)
    */
-  leaf_map(size_t initial = 16)
+  Leaf_map(size_t initial = 16)
       : _store(next_pow2(initial)), _mask(_store.size() - 1), _size(0), _max_load(0.65f) {}
 
   /**
@@ -147,7 +147,7 @@ public:
   }
 
   /// Const overload of get()
-  std::string *get(const std::string &k) const { return const_cast<leaf_map *>(this)->get(k); }
+  std::string *get(const std::string &k) const { return const_cast<Leaf_map *>(this)->get(k); }
 
   /**
    * @brief Erase entry by key. Returns true if key existed.

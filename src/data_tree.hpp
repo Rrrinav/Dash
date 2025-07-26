@@ -1,113 +1,118 @@
 #pragma once
 
+#include <algorithm>
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <optional>
 #include <string>
-#include <variant>
-#include <format>
+#include <ranges>
+#include <vector>
+#include <cstdint>
+#include <unordered_map>
 
-struct Node;
-struct Leaf;
+#include "leaf_map.hpp"
+#include "assert.hpp"
 
-using Tree = std::variant<std::monostate, Node*, Leaf*>;
 using Tag = uint8_t;
 
 inline constexpr Tag TAG_ROOT = 1; // 0001
 inline constexpr Tag TAG_NODE = 2; // 0010
 inline constexpr Tag TAG_LEAF = 4; // 0100
 
-struct Leaf
+using NodeID = std::uint32_t;
+
+// Using RAM addresses as hash
+class string_intern
 {
-  Tag          _tag;
-  Tree         _left;
-  Leaf *       _right = nullptr;
-  std::string  _key;
-  std::string  _value;
+  static inline std::vector<std::string> _paths;
+  static inline std::unordered_map<std::string, NodeID> _str_to_id;
+public:
+  // Interns a string and returns its unique ID (1-based)
+  [[nodiscard]]
+  static NodeID string_to_key(const std::string &path)
+  {
+    auto it = _str_to_id.find(path);
+    if (it != _str_to_id.end())
+      return it->second;
 
-  Leaf(const std::string& key, const std::string &value)
-    : _tag(TAG_LEAF), _left(),  _right(nullptr), _key(key), _value(value) {}
+    _paths.emplace_back(path);
+    NodeID id = _paths.size();  // 1-based
+    _str_to_id[path] = id;
+    return id;
+  }
 
-  Leaf(const std::string &key, const std::string &value, Tree left)
-    : _tag(TAG_LEAF), _left(left), _key(key), _value(value) {}
-
-  ~Leaf() = default;
-  Leaf(const Leaf &) = delete;
-  Leaf &operator=(const Leaf &) = delete;
-
-  Leaf(Leaf &&) = default;
-  Leaf &operator=(Leaf &&) = default;
-
-  static Leaf *create_leaf(Node *parent, const std::string &key, const std::string &value);
+  // Resolve an ID back to the original string
+  [[nodiscard]]
+  static std::optional<std::string_view> key_to_string(NodeID id)
+  {
+    if (id == 0 || id > _paths.size())
+      return std::nullopt;
+    return std::string_view(_paths[id - 1]);
+  }
 };
 
 struct Node
 {
-  Tag         _tag;
-  Node *      _up    = nullptr;
-  Node *      _left  = nullptr;
-  Leaf *      _right = nullptr;
+  Tag        _tag;
+  Node *      _parent = nullptr;
   std::string _path;
+  NodeID      _id;
+  std::vector<std::pair<uint64_t, Node*>> _nodes;
+  Leaf_map _leaves;
 
-  Node(Tag tag, const std::string &path, Node *parent = nullptr) 
-    : _tag(tag), _up(parent), _path(path) {}
+  Node(Node * parent, const std::string& path)
+    : _parent(parent), _path(path), _id(string_intern::string_to_key(path)), _nodes({})
+  {}
 
-  Node(Tag tag, const std::string &path, Node *parent, Node *left, Leaf *right)
-    : _tag(tag), _up(parent), _left(left), _right(right), _path(path) {}
+  ~Node()
+  {
+    for (auto n : _nodes) delete n.second;
+  }
 
-  ~Node();
-  Node(const Node &) = delete;
-  Node &operator=(const Node &) = delete;
-  Node(Node &&) = default;
-  Node &operator=(Node &&) = default;
+  NodeID insert(Node * node);
 
-  static Node *create_node(Node *parent, const std::string &path);
+  static Node * create_node(Node * parent, const std::string& path)
+  {
+    __assert(parent != nullptr, "Node has to exist");
+
+    Node *node = new Node(parent, path);
+    return node;
+  }
+
+  Node * create_child_node(const std::string& path);
+
+  std::optional<Node *> search(const std::string& path);
+
+  Node* delete_child_node(const std::string& path);
 };
 
-Leaf *find_last_leaf(Node *parent);
-
-
-// -------------------------------------------------------------------------
-// FORMATTING FUNCTIONS [ std::format() ]
-// -------------------------------------------------------------------------
-
-std::string format_node(const Node &node, int depth = 0);
-std::string format_leaf(const Leaf &leaf, int depth = 0);
-std::string format_tree(const Tree &tree, int depth = 0);
-
-template <>
-struct std::formatter<Tree>
+class Tree
 {
-  constexpr auto parse(std::format_parse_context &ctx)
-  {
-    return ctx.begin();  // No custom format options
-  }
-  auto format(const Tree &t, std::format_context &ctx) const
-  {
-    return std::format_to(ctx.out(), "{}", format_tree(t));
-  }
+  Node * _root;
+
+public:
+  Tree(const std::string& parth = "/") : _root(new Node(nullptr, "/"))
+  { _root->_tag = TAG_ROOT; }
+  ~Tree() { delete _root; }
+
+  std::optional<Node *> find(const std::string& path) const;
+  Node *insert(const std::string &path);
+
+  bool remove(const std::string &path);
+
+  std::expected<std::string *, std::string> set(const std::string& path, const std::string& key, const std::string& val);
+
+  [[nodiscard("Use it immediately or copy it, pointer may become invalid after next operation on map or map deletion")]]
+  std::expected<std::string*, std::string> get(const std::string& path, const std::string& key);
+
+  std::string print() const;
+
+private:
+  void print_recursive(Node *root, int indent, std::string &out) const;
+
+  std::vector<std::string> split_path_view(const std::string &path) const;
+
+  std::string join_path(const std::vector<std::string> &components) const;
 };
-
-template <>
-struct std::formatter<Node>
-{
-  constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
-  auto format(const Node &node, std::format_context &ctx) const 
-  {
-    return std::format_to(ctx.out(), "{}", format_node(node)); 
-  }
-};
-
-template <>
-struct std::formatter<Leaf>
-{
-  constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
-  auto format(const Leaf &leaf, std::format_context &ctx) const 
-  {
-    return std::format_to(ctx.out(), "{}", format_leaf(leaf)); 
-  }
-};
-
-// Internal helper: recursively build the formatted string
-void pretty_print_impl(const Tree &t, int depth, const std::string &prefix, std::string &out);
-
-// Public API: pretty-print the tree into a formatted string
-std::string pretty_print(const Tree &t, int depth = 0);
