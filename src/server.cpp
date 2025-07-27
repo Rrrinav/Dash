@@ -15,111 +15,6 @@
 #include "./data_tree.hpp"
 #include "./assert.hpp"
 
-enum class Query_type { GET, PUT, CREATE, HELP, DEL, SHOW, INVALID };
-
-struct Query
-{
-  Query_type _type;
-  std::string _path;
-  std::string _key;
-  std::string _value;
-};
-
-inline void trim_left(std::string &str)
-{
-  size_t s = str.find_first_not_of(" \t");
-  if (s == std::string::npos)
-    str.clear();
-  else
-    str.erase(0, s);
-}
-
-inline void trim_right(std::string &str)
-{
-  size_t pos = str.find_last_not_of(" \r\n\t");
-  if (pos != std::string::npos)
-    str.erase(pos + 1);
-  else
-    str.clear();
-}
-
-std::vector<std::string> split_by_space(std::string input)
-{
-  std::vector<std::string> tokens;
-  trim_left(input);
-
-  while (!input.empty())
-  {
-    size_t space_pos = input.find(' ');
-    if (space_pos == std::string::npos)
-    {
-      tokens.push_back(input);
-      break;
-    }
-    else
-    {
-      tokens.push_back(input.substr(0, space_pos));
-      input.erase(0, space_pos + 1);
-      trim_left(input);
-    }
-  }
-  return tokens;
-}
-
-std::optional<Query> parse_command(std::string input)
-{
-  trim_right(input);
-  trim_left(input);
-
-  if (input.empty())
-    return std::nullopt;
-
-  // Handle help command first
-  if (input == "help" || input == "-h" || input == "Help" || input == "h")
-    return Query{Query_type::HELP, {}, {}, {}};
-
-  if (input == "show" || input == "-p" || input == "print" || input == "Print" || input == "Show")
-    return Query{Query_type::SHOW, {}, {}, {}};
-
-  auto tokens = split_by_space(input);
-  if (tokens.empty())
-    return std::nullopt;
-
-  Query result{Query_type::INVALID, {}, {}, {}};
-  const auto &cmd = tokens[0];
-
-  if (cmd == "create")
-  {
-    if (tokens.size() < 2)
-      return std::nullopt;
-    result._type = Query_type::CREATE;
-    result._path = tokens[1];
-    return result;
-  }
-
-  if (cmd == "get")
-  {
-    if (tokens.size() < 3)
-      return std::nullopt;
-    result._type = Query_type::GET;
-    result._path = tokens[1];
-    result._key = tokens[2];
-    return result;
-  }
-
-  if (cmd == "put")
-  {
-    if (tokens.size() < 4)
-      return std::nullopt;
-    result._type = Query_type::PUT;
-    result._path = tokens[1];
-    result._key = tokens[2];
-    result._value = tokens[3];
-    return result;
-  }
-
-  return std::nullopt;
-}
 
 int init_server(uint16_t _port)
 {
@@ -164,68 +59,6 @@ void child_routine(int s_cli, std::unique_ptr<Sk_client> &client, Tree &tree, bo
   buffer.resize(bytes_read);
   std::print("Received: {}", buffer);
 
-  auto cmd = parse_command(buffer);
-  if (!cmd)
-  {
-    std::string mess = "Bad command\r\n";
-    send(s_cli, mess.data(), mess.size(), 0);
-    return;
-  }
-
-  switch (cmd->_type)
-  {
-    case Query_type::HELP: {
-      std::string mess =
-          "Commands:\r\n"
-          "  create <path>\r\n"
-          "  put <path> <key> <value>\r\n"
-          "  get <path> <key>\r\n";
-
-      send(s_cli, mess.data(), mess.size(), 0);
-    } break;
-    case Query_type::SHOW: {
-      std::string mess = tree.print();
-      send(s_cli, mess.data(), mess.size(), 0);
-    } break;
-    case Query_type::CREATE: {
-      auto n = tree.insert(cmd->_path);
-      if (n == nullptr)
-        std::println("null");
-
-      std::string mess = "100 OK\r\n";
-      send(s_cli, mess.data(), mess.size(), 0);
-    } break;
-    case Query_type::GET: {
-      auto s = tree.get(cmd->_path, cmd->_key);
-      if (s)
-      {
-        std::string mess = *s.value() + "\r\n";
-        send(s_cli, mess.data(), mess.size(), 0);
-      }
-      else
-      {
-        std::string error_msg = s.error();
-        send(s_cli, error_msg.data(), error_msg.size(), 0);
-      }
-    } break;
-    case Query_type::PUT: {
-      auto s = tree.set(cmd->_path, cmd->_key, cmd->_value);
-      if (!s)
-      {
-        std::string error_msg = s.error();
-        send(s_cli, error_msg.data(), error_msg.size(), 0);
-      }
-      else
-      {
-        std::string mess = "100 OK\r\n";
-        send(s_cli, mess.data(), mess.size(), 0);
-      }
-    } break;
-    case Query_type::INVALID: default: {
-      std::string mess = "Invalid command\r\n";
-      send(s_cli, mess.data(), mess.size(), 0);
-    } break;
-  };
 }
 
 void main_routine(int _skt)
@@ -238,8 +71,7 @@ void main_routine(int _skt)
     return;
 
   // PERF: This is slow, we can use memory pool or any other method
-  auto client =
-      std::make_unique<Sk_client>(Sk_client{.skt = s_cli, .ip = inet_ntoa(client_addr.sin_addr), .port = ntohs(client_addr.sin_port)});
+  auto client = std::make_unique<Sk_client>(Sk_client{.skt = s_cli, .ip = inet_ntoa(client_addr.sin_addr), .port = ntohs(client_addr.sin_port)});
 
   std::println("Accepted := {}:{}", client->ip, client->port);
 
