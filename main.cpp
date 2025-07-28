@@ -1,6 +1,7 @@
 #include "./src/server.hpp"
 
 #include <csignal>
+#include <cstdint>
 #include <exception>
 #include <print>
 #include <string>
@@ -19,7 +20,7 @@ int print_usage(std::string prog)
 
 int main(int argc, char * argv[])
 {
-  unsigned short port = 0;
+  uint16_t port = 0;
   if (argc == 2)
   {
     try
@@ -32,10 +33,8 @@ int main(int argc, char * argv[])
 
   std::signal(SIGCHLD, handle_sigchld);
 
-  int skt = init_server(port);
-
-  while (true)
-    main_routine(skt);
+  int skt = init_server(port, HOST);
+  run_server(skt);
 
   close(skt);
   return 0;
