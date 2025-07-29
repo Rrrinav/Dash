@@ -200,7 +200,7 @@ struct Client
   std::optional<Send_task> send_task;
 
   ~Client()
-  { }
+  { __assert(read_task == nullptr, "Must clear the read task before deleting client."); }
 
   void queue_send(const std::string &data)
   {
@@ -726,6 +726,7 @@ void run_server(int server_fd)
         {
           std::println("Cleaning reading task and client: {}:{} fd= {}.", recv->client->addr, recv->client->port, recv->client->fd);
           if (recv->client->read_task) delete recv->client->read_task;
+          recv->client->read_task = nullptr;
           cleanup_client(recv->client);
         }
         continue;

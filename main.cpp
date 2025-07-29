@@ -28,8 +28,7 @@ int main(int argc, char * argv[])
     catch(std::exception & e)
     { return print_usage(argv[0]); }
   }
-
-  port = PORT;
+  else port = PORT;
 
   std::signal(SIGCHLD, handle_sigchld);
 
